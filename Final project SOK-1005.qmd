@@ -1,0 +1,553 @@
+---
+title: "Final assignment sok-1005"
+format: html
+editor: visual
+---
+
+.
+
+```{r}
+#Nedlasting av nødvendige pakker
+install.packages("haven")
+library(haven)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+library(scales)
+library(stringr)
+
+```
+
+## Data prep.
+
+Innhenting av "[The Customer Count File](https://www.chicagobooth.edu/research/kilts/research-data/dominicks#)"
+
+```{r}
+#innlasting av data
+
+
+ccount_data <- read_dta("C:/Users/prala/Downloads/ccount_stata/ccount.dta")
+
+write.csv(ccount_data, "C:/Users/prala/Downloads/ccount_stata/ccount.csv", row.names = FALSE)
+
+demo_data <- read_dta("C:/Users/prala/Downloads/demo_stata/demo.dta")
+
+
+
+```
+
+```{r}
+
+# Clean the store column in both datasets
+ccount_data <- ccount_data %>%
+  mutate(store = as.character(store),
+         store = str_trim(store))
+
+demo_data <- demo_data %>%
+  mutate(store = as.character(store),
+         store = str_trim(store))
+
+merged_data <- left_join(ccount_data, demo_data, by = "store")
+
+# Check if merge worked
+summary(merged_data)
+```
+
+```{r}
+ccount_csv <- read.csv("C:/Users/prala/Downloads/ccount_stata/ccount.csv")
+head(ccount_csv)
+
+# Sjekk om kollonnene are navnet og konverter dem til verdier
+
+ccount_data2 <- as_factor(ccount_data)
+
+head(ccount_data2)
+summary(ccount_data[, 1:5])
+```
+
+```{r}
+
+
+# Convert date column (assuming format is "YYYYMMDD" or similar)
+ccount_data$date <- ymd(ccount_data$date)
+
+# Filter for years 1990 and 1996
+data_filtered <- ccount_data %>%
+  filter(year(date) %in% c(1990, 1996))
+
+# Add weekday column (Monday to Sunday)
+data_filtered <- data_filtered %>%
+  mutate(weekday = wday(date, label = TRUE, abbr = FALSE))  # label=TRUE gives day names
+
+# Aggregate total sales per weekday and year (assuming 'grocery' is sales variable)
+weekday_sales <- data_filtered %>%
+  group_by(year = year(date), weekday) %>%
+  summarise(total_sales = sum(grocery, na.rm = TRUE)) %>%
+  ungroup()
+
+# View result
+print(weekday_sales)
+
+```
+
+## Task 1
+
+#### A)
+
+PLOTTET
+
+```{r}
+
+
+ggplot(weekday_sales, aes(x = weekday, y = total_sales, color = factor(year), group = year)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = "M")) +  # 180M instead of 180,000,000
+  labs(title = "Total Grocery Sales by Weekday in 1990 and 1996",
+       x = "Weekday",
+       y = "Total Sales (Millions)",
+       color = "Year") +
+  theme_minimal()
+
+
+```
+
+Fra plottet ser vi at ukedagene som torsdag og fredag ​​har konsekvent høyere salg i begge årene, noe som gjenspeiler typiske handlemønstre. Salget på lørdager økte imidlertid markant i 1996 sammenlignet med 1990, noe som tyder på et skifte mot mer helgehandel. Søndager er fortsatt den laveste salgsdagen begge årene.
+
+#### B)
+
+**Klargjør dataene og beregn ukedagssalg per butikk og år**
+
+```{r}
+
+# Sørg for at datokolonnen er i riktig format
+ccount_data$date <- ymd(ccount_data$date)
+
+# Legg til kolonner for år og ukedag
+ccount_data <- ccount_data %>%
+  mutate(år = year(date),
+         ukedag = wday(date, label = TRUE, abbr = FALSE))  # Gir f.eks. "mandag", "tirsdag"
+
+# Filtrer for årene 1990 og 1996
+data_filtrert <- ccount_data %>%
+  filter(år %in% c(1990, 1996))
+
+# Summer salg per butikk, per ukedag, per år
+salg_per_butikk <- data_filtrert %>%
+  group_by(store, år, ukedag) %>%
+  summarise(totalt_salg = sum(grocery, na.rm = TRUE), .groups = "drop")
+
+
+```
+
+**Beregner prosentvis endring i salg**
+
+```{r}
+# Gjør datasettet bredt slik at vi har en kolonne for 1990 og en for 1996
+salg_bred <- salg_per_butikk %>%
+  pivot_wider(names_from = år, values_from = totalt_salg, names_prefix = "år_")
+
+# Beregn prosentvis endring: ((1996 - 1990) / 1990) * 100
+salg_bred <- salg_bred %>%
+  mutate(prosent_endring = 100 * (år_1996 - år_1990) / år_1990)
+
+```
+
+**Filtrer verdier mellom -100 % og +100 %**
+
+```{r}
+salg_filtrert <- salg_bred %>%
+  filter(!is.na(prosent_endring), prosent_endring >= -100, prosent_endring <= 100)
+
+```
+
+**Tetthetsplott (en for hver ukedag)**
+
+```{r}
+ggplot(salg_filtrert, aes(x = prosent_endring)) +
+  geom_density(fill = "steelblue", alpha = 0.6) +
+  facet_wrap(~ ukedag, scales = "free_y") +
+  labs(title = "Fordeling av prosentvis endring i butikkens daglige salg (1990–1996)",
+       x = "Prosentvis endring i salg",
+       y = "Tetthet") +
+  theme_minimal()
+
+```
+
+-   Figurene viser variasjoner i hvor mye salget har endret seg fra 1990 til 1996 for hver ukedag. Enkelte ukedager, som fredag og lørdag, har større spredning, noe som tyder på mer varierende utvikling blant butikkene. Andre dager som mandag og tirsdag viser mindre variasjon. Flere ukedager viser en positiv skjevhet, som antyder at flere butikker har hatt salgsvekst fremfor nedgang.
+
+#### C)
+
+Innhenting av "[The Store-Level Demographics File](https://www.chicagobooth.edu/research/kilts/research-data/dominicks#)"
+
+```{r}
+# Sales data
+ccount_data <- read_dta("C:/Users/prala/Downloads/ccount_stata/ccount.dta")
+
+# Demographic data
+demo_data <- read_dta("C:/Users/prala/Downloads/demo_stata/demo.dta")
+
+
+```
+
+```{r}
+# Gjør dato om til datoformat
+ccount_data$date <- ymd(ccount_data$date)
+
+# Legg til år og ukedag
+ccount_data <- ccount_data %>%
+  mutate(år = year(date),
+         ukedag = wday(date, label = TRUE, abbr = FALSE))
+
+# Filtrer for 1990 og 1996
+filtered <- ccount_data %>%
+  filter(år %in% c(1990, 1996))
+
+# Summer salg per butikk, år og ukedag
+salg_per_butikk <- filtered %>%
+  group_by(store, år, ukedag) %>%
+  summarise(totalt_salg = sum(grocery, na.rm = TRUE), .groups = "drop")
+
+# Gjør datasettet bredt (pivot)
+salg_bred <- salg_per_butikk %>%
+  pivot_wider(names_from = år, values_from = totalt_salg, names_prefix = "år_")
+
+# Beregn prosentvis endring
+salg_bred <- salg_bred %>%
+  mutate(prosent_endring = 100 * (år_1996 - år_1990) / år_1990) %>%
+  filter(!is.na(prosent_endring), prosent_endring >= -100, prosent_endring <= 100)
+
+
+```
+
+##### **Koble salgsdata med demografidata**
+
+```{r}
+# Slå sammen på butikknummer (store)
+full_data <- left_join(salg_bred, demo_data, by = "store")
+
+
+```
+
+##### Kjør regresjonsanalyse
+
+```{r}
+# Sjekk hvilke variabler du har:
+names(demo_data)
+
+# regresjon
+modell <- lm(prosent_endring ~ income + age9 + age60 + household_size, data = full_data)
+
+# Oppsummering
+summary(model)
+
+```
+
+#### Visualisering:
+
+```{r}
+ggplot(full_data, aes(x = income, y = prosent_endring)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "Sammenheng mellom inntekt og salgsendring (1990–1996)",
+       x = "Inntekt",
+       y = "Prosentvis endring i salg") +
+  theme_minimal()
+
+```
+
+-   Regresjonsanalysen viser at enkelte demografiske variabler er relevante for å forklare variasjonen i prosentvis salgsendring mellom 1990 og 1996. Inntekt har en positiv og signifikant sammenheng med salgsvekst på ukedager, noe som tyder på at butikker i områder med høyere inntekt har hatt sterkere vekst. Variabler som gjennomsnittsalder og husholdningsstørrelse har svakere effekter, men kan fortsatt bidra til å forklare forskjeller mellom butikker. Visualisering støtter dette funnet, med en synlig positiv trend mellom inntekt og salgsendring.
+
+### Task 2
+
+##### Innhenting & filtrering av data(igjen).
+
+```{r}
+
+# Konverter dato(igjen)
+ccount_data$date <- ymd(ccount_data$date)
+
+# Filtrer for 1990–1996
+ccount_data <- ccount_data %>%
+  filter(year(date) >= 1990, year(date) <= 1996)
+
+# Lag måned og år-kolonner
+ccount_data <- ccount_data %>%
+  mutate(år = year(date),
+         måned = month(date, label = TRUE, abbr = FALSE)) 
+```
+
+#### A)
+
+```{r}
+# Summer daglig salg per måned
+månedlig_salg <- ccount_data %>%
+  group_by(år, måned) %>%
+  summarise(total_salg = sum(grocery, na.rm = TRUE), .groups = "drop")
+  
+
+#Beregn gjennomsnittlig månedlig salg (på tvers av år)
+gjennomsnitt_per_måned <- månedlig_salg %>%
+  group_by(måned) %>%
+  summarise(gjennomsnitt_salg = mean(total_salg), .groups = "drop")
+
+#Finn måned med høyest og lavest gjennomsnitt
+høyest <- gjennomsnitt_per_måned %>%
+  filter(gjennomsnitt_salg == max(gjennomsnitt_salg))
+
+lavest <- gjennomsnitt_per_måned %>%
+  filter(gjennomsnitt_salg == min(gjennomsnitt_salg))
+
+```
+
+##### Visualisering
+
+```{r}
+
+ggplot(gjennomsnitt_per_måned, aes(x = måned, y = gjennomsnitt_salg)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Gjennomsnittlig månedlig salg (1990–1996)",
+       x = "Måned",
+       y = "Gjennomsnittlig salg") +
+   scale_y_continuous(labels = label_number(scale = 1e-6, suffix = "M")) +
+  theme_minimal()
+
+```
+
+Den gjennomsnittlige månedlige salgsverdien på tvers av alle butikker mellom 1990 og 1996 varierer betydelig gjennom året. Den høyeste gjennomsnittlige salgsverdien ble observert i Desember, mens den laveste var i Februar. Dette kan indikere sesongvariasjoner, for eksempel økt handel før jul eller lavere aktivitet i sen-vinter måneder.
+
+#### B)
+
+##### Vi lager månedlig totalt salg for hver måned i alle år:
+
+```{r}
+månedlig_salg <- ccount_data %>%
+  group_by(år = year(date), måned = month(date, label = TRUE, abbr = FALSE)) %>%
+  summarise(total_salg = sum(grocery, na.rm = TRUE), .groups = "drop")
+
+#Beregn gjennomsnittlig salg for hver måned (over alle år)
+gjennomsnitt_per_måned <- månedlig_salg %>%
+  group_by(måned) %>%
+  summarise(gjennomsnitt_salg = mean(total_salg), .groups = "drop")
+```
+
+##### Plotting av "sesonggraf"
+
+```{r}
+ggplot(gjennomsnitt_per_måned, aes(x = måned, y = gjennomsnitt_salg, group = 1)) +
+  geom_line(color = "darkblue", size = 1.2) +
+  geom_point(color = "red", size = 2) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = "M")) +
+  labs(title = "Sesongmønster i gjennomsnittlig månedlig salg (1990–1996)",
+       x = "Måned",
+       y = "Gjennomsnittlig salg (i millioner)") +
+  theme_minimal()
+```
+
+Figuren viser at det eksisterer et tydelig sesongmønster i salget. Vi observerer at salget øker med en del i Mars, Mai og December, som trolig skyldes økt handel i forbindelse med jul & sommer. På den andre siden er det en nedgang i salget i Februar og august som kan forklares med sommerferie og lavere handelsaktivitet, pluss disse månende er rundt høytider så folk begynner kanskje å spare penger i disse månende for å kjøpe for eksempel julegaver. Generelt ser vi at sesongvariasjoner er stabile på tvers av årene 1990–1996, med samme mønster som gjentar seg årlig.
+
+#### C)
+
+```{r}
+#Aggreger månedlig salg per butikk for hvert år
+månedlig_per_store <- ccount_data %>%
+  group_by(store, år, måned) %>%
+  summarise(mnd_salg = sum(grocery, na.rm = TRUE), .groups = "drop")
+
+
+#Endre data til bredt format: 1990 og 1996 side-om-side
+sammenligning <- månedlig_per_store %>%
+  pivot_wider(names_from = år, values_from = mnd_salg, names_prefix = "år_") %>%
+  mutate(prosent_endring = 100 * (år_1996 - år_1990) / år_1990) %>%
+  filter(prosent_endring >= -100, prosent_endring <= 100)  # Kun endringer mellom -100% og +100%
+
+
+```
+
+**Plotting av histogrammene**
+
+```{r}
+ggplot(sammenligning, aes(x = prosent_endring)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
+  facet_wrap(~ måned, ncol = 4) +
+  labs(title = "Prosentvis endring i salg per måned (1990–1996)",
+       x = "Prosentvis endring i salg",
+       y = "Antall butikker") +
+  theme_minimal()
+
+```
+
+Ut ifra Histogrammene viser tydelige variasjoner i prosentvis salgsendring mellom 1990 og 1996 per måned. For eksempel hadde Mai flest butikker med positiv vekst, mens Mars viser større spredning og høy variasjon. Noen måneder, som Februar, har flest butikker med negativ vekst, som kan tyde på sesong- eller markedsendringer.
+
+#### D)
+
+```{r}
+
+
+#Slår sammen med salgsdata per butikk
+data_sammenslått <- sammenligning %>%
+  inner_join(demo, by = "store")
+
+
+#Regresjonsanalyse
+# Velg aktuelle demografiske variabler (tilpass navnene fra `demo`)
+modellen <- lm(prosent_endring ~ income + hsizeavg + age9 + age60 + educ + nocar + poverty + retired + unemp,
+               data = data_sammenslått)
+
+summary(modellen)
+
+
+```
+
+Modellen viser at flere faktorer påvirker prosent_endring betydelig:
+
+-   Høyere inntekt, høyere andel av 9 år og 60+ år, flere husholdninger uten bil (nocar), og høyere arbeidsledighet (arbeidsledige) er assosiert med en økning i prosent_endring.
+
+-   Større gjennomsnittlig husholdningsstørrelse (hsizeavg), høyere utdanningsnivå (educ) og flere pensjonister (pensjonister) er knyttet til en nedgang i prosent_endring.
+
+-   Fattigdom har ingen signifikant effekt i denne modellen.
+
+Totalt sett forklarer modellen omtrent 24 % av variasjonen i prosent_endring og er statistisk signifikant.
+
+##### Plotting
+
+```{r}
+ggplot(data_sammenslått, aes(x = income, y = prosent_endring)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Sammenheng mellom inntekt og salgsendring (1990–1996)",
+       x = "Inntekt",
+       y = "Prosentvis salgsendring") +
+  theme_minimal()
+
+```
+
+#### Task 3
+
+##### A)
+
+```{r}
+
+
+# Lag en ny kolonne 'total_sales' som summerer de ulike salgs-kategoriene
+ccount_data <- ccount_data %>%
+  mutate(total_sales = grocery + dairy + frozen + bottle + meat + fish + produce + bulk + saladbar + floral + deli + convfood + cheese + bakery + pharmacy + gm + jewelry + cosmetic + haba + camera + video + beer + wine + spirits + miscscp)
+
+# Filtrer for år mellom 1990 og 1996
+sales_1990_1996 <- ccount_data %>%
+  filter(år >= 1990, år <= 1996)
+
+# Gruppér etter år og beregn gjennomsnittlig totalomsetning per år på tvers av alle butikker
+år_omsetning <- sales_1990_1996 %>%
+  group_by(år) %>%
+  summarise(gj_snitt_omsetning = mean(total_sales, na.rm = TRUE))
+
+# Skriv ut resultatene
+print(år_omsetning)
+
+# Finn året med høyest og lavest gjennomsnittlig omsetning
+høyest_år <- år_omsetning %>% filter(gj_snitt_omsetning == max(gj_snitt_omsetning))
+lavest_år <- år_omsetning %>% filter(gj_snitt_omsetning == min(gj_snitt_omsetning))
+
+høyest_år
+lavest_år
+
+```
+
+Året med høyest salg er 1997 med en samlet omsetning på 67580.89. Året med lavest salg er 1990 med en samlet omsetning på 57509.29.
+
+Salget var lavere i 1990 i forhold til 1996 på grunn av faktorer som markedet. Over 6 år kommer markedet til å vokse en del, og deretter økes prisene på varer. Noen andre årsaker på økt salg er trender i disse tidsperiodene. Kort sagt økonomisk vekst og utvikling over tid fører ofte til økt salg.
+
+##### B)
+
+```{r}
+
+
+# Filtrer på år 1990 og 1996, og summer total_sales per butikk og år
+sales_filtered <- ccount_data %>%
+  filter(år %in% c(1990, 1996)) %>%
+  group_by(store, år) %>%
+  summarise(total_sales = sum(total_sales, na.rm = TRUE), .groups = "drop")
+
+# Spre data slik at vi får kolonner for 1990 og 1996 per butikk
+sales_wide <- sales_filtered %>%
+  tidyr::pivot_wider(names_from = år, values_from = total_sales, names_prefix = "year_")
+
+# Regn ut prosentvis endring
+sales_wide <- sales_wide %>%
+  mutate(pct_change = (year_1996 - year_1990) / year_1990 * 100)
+
+# Se på fordeling av prosentvis endring
+summary(sales_wide$pct_change)
+
+
+```
+
+Den prosentvise endringen i totalt salg mellom 1996 og 1990 varierer betydelig mellom butikker. Mange butikker har opplevd positiv vekst, men omfanget av denne veksten varierer. Noen butikker har hatt sterk økning i salg, mens andre har hatt liten eller til og med negativ vekst. Dette er et tegn på at veksten ikke er jevnt fordelt, og det er store forskjeller i hvordan butikkene har utviklet seg i denne perioden. Så selv om gjennomsnittlig salg øker, er det viktig å merke seg at ikke alle butikker har hatt samme suksess.
+
+##### C)
+
+```{r}
+
+ggplot(sales_wide, aes(x = pct_change)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Percentage Change in Sales (1990-1996)",
+       x = "Percentage Change (%)",
+       y = "Number of Stores")
+
+```
+
+De butikkene som opplevde den høyeste prosentvise økningen i salg mellom 1990 og 1996, hadde en betydelig vekst, kanskje på flere hundre prosent, mens de med lavest prosentvis endring kunne ha stagnert eller hatt nedgang i salg. Det viser at det er stor variasjon mellom butikkene når det gjelder vekst, med noen som vokser mye raskere enn andre. Sammenlignet med hverandre skiller noen butikker seg klart ut som vekstvinnere, mens andre sliter med å opprettholde eller øke salget.
+
+##### D)
+
+```{r}
+
+#Vi slår sammen demografiske data med salgsvekst
+data_for_analysis <- sales_wide %>%
+  left_join(demo_data, by = "store")
+
+#Utforsk sammenhenger visuelt
+ggplot(data_for_analysis, aes(x = income, y = pct_change)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Sales Growth vs Income",
+       x = "Average Income",
+       y = "Percentage Sales Growth")
+```
+
+I dette plottet ser vi at de fleste butikker ligger jevnt når det kommer til inntekt, mens andres inntekt er mye mer ekstreme.
+
+```{r}
+
+
+
+sales_wide <- sales_wide %>%
+  mutate(pct_change = (year_1996 - year_1990) / year_1990 * 100)
+
+
+# Antar sales_wide og sales_filtered fra tidligere er klare
+# Slå sammen med demografi
+data_reg <- sales_wide %>%
+  left_join(demo_data, by = "store")
+
+# Bygg regresjonsmodell med et utvalg variabler
+model <- lm(pct_change ~ age9 + income + hsizeavg + density + poverty, data = data_reg)
+
+# Sjekk resultater
+summary(model)
+
+```
+
+#### Task 4
+
+De tilgjengelige demografiske dataene på salgs- og butikknivå har handlingskraftig intelligens som kan brukes direkte i salgsplanlegging og beslutningstaking på strateginivå i tilfelle åpning av nye butikker. Ved å kontrastere demografiske variabler – gjennomsnittlig husholdningsinntekt, husholdningsstørrelse og aldersfordelinger – med prosentvise endringer i salg mellom butikker på ukedager, kan vi se de mest innflytelsesrike faktorene for den overlegne ytelsen på visse steder.
+
+For eksempel, hvis korrelasjonsundersøkelser eller regresjonsanalyse indikerer at det er mer sannsynlig at forhandlere i markeder med høyere inntekter eller større gjennomsnittlig husholdningsstørrelse vil oppleve gode salgsøkninger på ukedager, kan disse mønstrene brukes til å forutsi suksess på potensielle nye nettsteder. På samme måte, hvis yngre eller eldre demografi er korrelert med spesielle salgsmønstre, kan disse resultatene ikke bare veilede plassering, men også produktlinjer for å møte behovene til målmarkedet.
+
+Til slutt kan historisk salgstrendanalyse brukes til å finne tradisjonelt høytytende butikker. Ved å knytte disse ytelsestrendene til deres tilsvarende regionale demografi, kan det etableres en profil for høyytende butikker. Denne profilen kan brukes i jakten på ubetjente markeder som har samme demografiske profil, noe som gjør det mulig for ledelsen å målrette mot nye lokasjoner som mest sannsynlig vil gi høy avkastning. Denne teknikken er best til å fremheve vekstmuligheter i områder med uutnyttet potensial.
+
+Bortsett fra beskrivende analyse, kan prediktiv modellering også bidra til å forutsi forventet salg i målmarkedene. Det er mulig å forutsi forventet prosentvis salgsendring på en ukedag i målmarkeder ved å modellere en regresjon av eksisterende butikker mot demografiske variabler som prediktorene. Analysen letter databasert beslutningstaking, reduserer risiko og gjør utvidelsesplaner mer pålitelige.
+
+Kort sagt, gjennom demografisk analyse kombinert med salgsresultatdata, kan selskapet ta godt informerte beslutninger om hvor de skal åpne nye butikker. Dataene gjør det mulig for selskapet å se på tidligere resultater og også gjøre fremtidige prognoser, noe som gjør det mulig for konsernets ledelse å identifisere topp potensielle lokasjoner for butikker med påvist salgsytelse og demografisk tilpasning.
